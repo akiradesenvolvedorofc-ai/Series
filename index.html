@@ -247,10 +247,6 @@ select.sort option{background:#0b0b16; color:#ecebf5}
 .player-now{display:inline-flex; align-items:center; gap:8px; padding:6px 14px; border-radius:99px; background:rgba(34,211,238,.1); border:1px solid rgba(34,211,238,.28); color:var(--p2); font-size:.76rem; font-weight:700; letter-spacing:.04em;}
 .player-wrap{position:relative; width:100%; aspect-ratio:16/9; background:#000; border-radius:18px; overflow:hidden; border:1px solid rgba(255,255,255,.12); box-shadow:0 24px 60px -24px rgba(0,0,0,.9);}
 .player-wrap iframe{position:absolute; inset:0; width:100%; height:100%; border:0;}
-.autonext-toggle{display:inline-flex; align-items:center; gap:7px; padding:6px 14px; border-radius:99px; cursor:pointer; background:rgba(255,255,255,.06); border:1px solid var(--border); color:var(--muted); font-family:inherit; font-size:.76rem; font-weight:700; letter-spacing:.02em; transition:all .3s var(--ease);}
-.autonext-toggle:hover{color:#fff; border-color:rgba(168,85,247,.5);}
-.autonext-toggle.active{background:linear-gradient(120deg,rgba(168,85,247,.2),rgba(34,211,238,.2)); border-color:rgba(168,85,247,.55); color:#fff; box-shadow:0 0 20px -6px rgba(168,85,247,.6);}
-.autonext-toggle .lucide{width:14px; height:14px;}
 
 .episodes-section{padding:0 34px 34px;}
 .episodes-section h3{font-family:'Bebas Neue',sans-serif; font-size:1.6rem; letter-spacing:.06em; margin-bottom:18px; display:flex; align-items:center; gap:10px;}
@@ -558,15 +554,9 @@ footer{position:relative; z-index:2; margin-top:60px; padding:70px 5vw 34px; bor
     <div class="player-section" id="playerSection">
       <div class="player-section-head">
         <h3><i data-lucide="clapperboard"></i> Assistir</h3>
-        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-          <span class="player-now" id="playerNow">
-            <i data-lucide="play-circle"></i> T1 E1
-          </span>
-          <button class="autonext-toggle active" id="autoNextToggle" title="Auto-avançar ativado">
-            <i data-lucide="skip-forward"></i>
-            <span>Auto-próximo</span>
-          </button>
-        </div>
+        <span class="player-now" id="playerNow">
+          <i data-lucide="play-circle"></i> T1 E1
+        </span>
       </div>
       <div class="player-wrap" id="playerWrap">
         <iframe id="playerFrame" src="about:blank" allowfullscreen allow="autoplay; encrypted-media" referrerpolicy="no-referrer"></iframe>
@@ -596,7 +586,7 @@ const TMDB_IMG = 'https://image.tmdb.org/t/p/w500';
 const TMDB_STILL = 'https://image.tmdb.org/t/p/w300';
 const PLAYER_BASE = 'https://mgeb.lat/embed/';
 
-const MAX_PAGES = 300; // 300 × 20 = 6000 títulos
+const MAX_PAGES = 300;
 const PAGE_SIZE = 20;
 const MAX_ITEMS = MAX_PAGES * PAGE_SIZE;
 
@@ -613,8 +603,6 @@ let currentModalItem = null;
 let currentSeasons = [];
 let currentSeasonNumber = null;
 let currentEpisodes = [];
-let autoNextEnabled = true;
-let autoNextTimer = null;
 let currentPlayingSeason = null;
 let currentPlayingEpisode = null;
 
@@ -734,72 +722,6 @@ function syncFavButtons(){
     }
     refreshIcons();
   }
-}
-
-/* ==========================================================
-   AUTO-NEXT — Timer com duração real do TMDB
-   (iframes cross-origin não permitem detectar "ended"[reference:2],
-   então usamos runtime do episódio + buffer)
-========================================================== */
-function findNextEpisode(season, episode){
-  if(!currentEpisodes || !currentEpisodes.length) return null;
-  const idx = currentEpisodes.findIndex(ep => ep.episode_number === episode);
-  if (idx >= 0 && idx < currentEpisodes.length - 1) {
-    return { season, episode: currentEpisodes[idx + 1].episode_number };
-  }
-  // Último episódio: tenta próxima temporada (incluindo especiais se for o caso)
-  const sIdx = currentSeasons.findIndex(s => s.season_number === season);
-  if (sIdx >= 0 && sIdx < currentSeasons.length - 1) {
-    return { season: currentSeasons[sIdx + 1].season_number, episode: 1 };
-  }
-  return null;
-}
-
-function cancelAutoNext(){
-  if(autoNextTimer){ clearTimeout(autoNextTimer); autoNextTimer = null; }
-}
-
-function startAutoNext(tvId, season, episode){
-  cancelAutoNext();
-  if(!autoNextEnabled) return;
-  if(!currentEpisodes || !currentEpisodes.length) return;
-  const next = findNextEpisode(season, episode);
-  if(!next) return; // último episódio absoluto → não agenda
-
-  const ep = currentEpisodes.find(e => e.episode_number === episode);
-  let runtime = (ep && ep.runtime && ep.runtime > 1) ? ep.runtime : 24;
-  // +3s de buffer: o player demora um pouco para carregar/começar
-  const totalMs = runtime * 60 * 1000 + 3000;
-
-  autoNextTimer = setTimeout(() => {
-    autoNextTimer = null;
-    if(!currentModalItem) return;
-    if(!$('#modalBackdrop').classList.contains('open')) return;
-    // Só avança se o usuário não trocou manualmente
-    if(currentPlayingSeason !== season || currentPlayingEpisode !== episode) return;
-    playNextEpisode(tvId);
-  }, totalMs);
-}
-
-async function playNextEpisode(tvId){
-  if(!currentModalItem || !$('#modalBackdrop').classList.contains('open')) return;
-  const next = findNextEpisode(currentPlayingSeason, currentPlayingEpisode);
-  if(!next){ toast('Você chegou ao último episódio disponível!', 'warn'); return; }
-  if(next.season === currentPlayingSeason){
-    markActiveEpisode(next.episode);
-    setPlayer(tvId, next.season, next.episode);
-    toast(`▶ Próximo: T${next.season} E${next.episode}`);
-  } else {
-    $$('.season-tab').forEach(t => t.classList.toggle('active', +t.dataset.season === next.season));
-    await loadEpisodes(tvId, next.season);
-    markActiveEpisode(next.episode);
-    setPlayer(tvId, next.season, next.episode);
-    toast(`▶ Nova temporada: T${next.season} E${next.episode}`);
-  }
-}
-
-function markActiveEpisode(epNum){
-  $$('.ep-card').forEach(c => c.classList.toggle('active', +c.dataset.ep === epNum));
 }
 
 /* ==========================================================
@@ -970,9 +892,7 @@ async function openModal(id, resumeProgress = false){
   currentModalItem = a;
   currentEpisodes = []; currentSeasons = [];
   currentSeasonNumber = null; currentPlayingSeason = null; currentPlayingEpisode = null;
-  cancelAutoNext();
 
-  // Se resumeProgress = true, abre direto no episódio salvo
   const prog = resumeProgress ? getProgress(a.id) : null;
   const startSeason = prog ? prog.season : 1;
   const startEpisode = prog ? prog.episode : 1;
@@ -1003,7 +923,6 @@ async function openModal(id, resumeProgress = false){
 }
 
 function closeModal(){
-  cancelAutoNext();
   $('#modalBackdrop').classList.remove('open');
   document.body.style.overflow = '';
   currentModalItem = null;
@@ -1024,9 +943,7 @@ async function loadSeasons(tvId, initialSeason = 1){
 
   try{
     const data = await tmdbFetch(`/tv/${tvId}`, { language: 'pt-BR' });
-    // Inclui TODAS as temporadas, inclusive season 0 (especiais)
     currentSeasons = (data.seasons || []).filter(s => s.season_number >= 0 && s.episode_count > 0);
-    // Ordena: temporadas normais primeiro (1..N), depois especiais (0) por último
     currentSeasons.sort((a,b) => {
       if(a.season_number === 0 && b.season_number !== 0) return 1;
       if(b.season_number === 0 && a.season_number !== 0) return -1;
@@ -1039,7 +956,6 @@ async function loadSeasons(tvId, initialSeason = 1){
       return;
     }
 
-    // Renderiza abas — especiais (season 0) com destaque
     tabsEl.innerHTML = currentSeasons.map((s, i) => {
       const isSpecial = s.season_number === 0;
       const label = isSpecial ? 'Especiais' : `Temporada ${s.season_number}`;
@@ -1051,13 +967,11 @@ async function loadSeasons(tvId, initialSeason = 1){
     }).join('');
 
     $$('.season-tab').forEach(tab => tab.addEventListener('click', () => {
-      cancelAutoNext();
       $$('.season-tab').forEach(t => t.classList.remove('active'));
       tab.classList.add('active');
       loadEpisodes(tvId, +tab.dataset.season);
     }));
 
-    // Carrega temporada inicial
     const first = currentSeasons.find(s => s.season_number === initialSeason) || currentSeasons[0];
     await loadEpisodes(tvId, first.season_number);
   } catch(e){
@@ -1115,19 +1029,14 @@ async function loadEpisodes(tvId, seasonNumber){
       toast(`Reproduzindo ${sn === 0 ? 'Especial' : 'T'+sn} E${epNum}`);
     }));
 
-    // Marca o episódio em reprodução como ativo
     const playing = currentEpisodes.find(e => e.episode_number === currentPlayingEpisode);
     if(playing && currentPlayingSeason === seasonNumber){
-      markActiveEpisode(playing.episode_number);
+      $$('.ep-card').forEach(c => c.classList.toggle('active', +c.dataset.ep === currentPlayingEpisode));
     } else {
       const first = $('.ep-card'); if(first) first.classList.add('active');
     }
 
     refreshIcons();
-
-    if (currentModalItem && currentPlayingSeason === seasonNumber && currentPlayingEpisode) {
-      startAutoNext(currentModalItem.id, seasonNumber, currentPlayingEpisode);
-    }
   } catch(e){
     console.error(e);
     listEl.innerHTML = `<div class="ep-loading">Erro ao carregar episódios.</div>`;
@@ -1135,7 +1044,6 @@ async function loadEpisodes(tvId, seasonNumber){
 }
 
 function setPlayer(tvId, season, episode){
-  cancelAutoNext();
   const frame = $('#playerFrame');
   frame.src = `${PLAYER_BASE}${tvId}/${season}/${episode}`;
   const now = $('#playerNow');
@@ -1146,9 +1054,6 @@ function setPlayer(tvId, season, episode){
   currentPlayingSeason = season;
   currentPlayingEpisode = episode;
   saveProgress(tvId, season, episode);
-  if (currentEpisodes && currentEpisodes.length && currentSeasonNumber === season) {
-    startAutoNext(tvId, season, episode);
-  }
 }
 
 /* ==========================================================
@@ -1384,17 +1289,6 @@ $('#modalBackdrop').addEventListener('click', e=>{ if(e.target===$('#modalBackdr
 $('#modalAdd').addEventListener('click', ()=>{ if(currentModalItem) toggleWatch(currentModalItem.id); });
 $('#modalTrailer').addEventListener('click', ()=>{ if(currentModalItem) window.open(`https://www.themoviedb.org/tv/${currentModalItem.id}`,'_blank'); });
 
-const autoNextToggle = $('#autoNextToggle');
-if(autoNextToggle){
-  autoNextToggle.addEventListener('click', () => {
-    autoNextEnabled = !autoNextEnabled;
-    autoNextToggle.classList.toggle('active', autoNextEnabled);
-    autoNextToggle.title = autoNextEnabled ? 'Auto-avançar ativado' : 'Auto-avançar desativado';
-    if(!autoNextEnabled){ cancelAutoNext(); toast('Auto-avanço desativado','warn'); }
-    else { toast('Auto-avanço ativado!'); if(currentModalItem && currentPlayingEpisode!==null) startAutoNext(currentModalItem.id, currentPlayingSeason, currentPlayingEpisode); }
-  });
-}
-
 document.addEventListener('keydown', e=>{
   if(e.key === 'Escape'){
     if($('#modalBackdrop').classList.contains('open')) closeModal();
@@ -1403,20 +1297,6 @@ document.addEventListener('keydown', e=>{
 });
 
 function debounce(fn, ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms); }; }
-
-// Bônus: se o embed enviar postMessage "ended", avança imediatamente
-window.addEventListener('message', (event) => {
-  try {
-    let data = event.data;
-    if(typeof data === 'string'){ try{ data = JSON.parse(data); }catch{} }
-    let str = (typeof data === 'string') ? data.toLowerCase() : JSON.stringify(data).toLowerCase();
-    if(str && (str.includes('"ended"') || str.includes('video_ended') || str.includes('playback_ended') || str.includes('complete'))){
-      if(currentModalItem && $('#modalBackdrop').classList.contains('open') && autoNextEnabled){
-        cancelAutoNext(); playNextEpisode(currentModalItem.id);
-      }
-    }
-  } catch {}
-});
 
 /* ==========================================================
    DATAS
